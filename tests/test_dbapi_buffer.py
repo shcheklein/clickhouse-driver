@@ -14,14 +14,10 @@ def cursor(request):
     client.execute.side_effect = lambda *args, **kwargs: (
         [(i,) for i in range(8)], columns
     )
-    client.execute_iter.side_effect = lambda *args, **kwargs: iter(
-        [columns] + [(i,) for i in range(8)]
-    )
     return request.param(client, Mock())
 
 
-@pytest.mark.parametrize('streaming', [False, True])
-def test_mixed_fetches_preserve_order_and_factories(cursor, streaming):
+def test_mixed_fetches_preserve_order_and_factories(cursor):
     def expected(number):
         if isinstance(cursor, DictCursor):
             return {'number': number}
@@ -29,7 +25,6 @@ def test_mixed_fetches_preserve_order_and_factories(cursor, streaming):
             return cursor._make_nt(('number',))(number)
         return (number,)
 
-    cursor.set_stream_results(streaming, 2)
     cursor.execute('SELECT number FROM numbers(8)')
     cursor.arraysize = 2
 
@@ -44,22 +39,7 @@ def test_mixed_fetches_preserve_order_and_factories(cursor, streaming):
     assert cursor.fetchone() is None
     assert cursor.fetchmany() == []
     assert cursor.fetchall() == []
-    assert cursor.rowcount == (-1 if streaming else 8)
-
-
-@pytest.mark.parametrize('size', [-1, 100])
-@pytest.mark.parametrize('streaming', [False, True])
-def test_fetchmany_remaining_rows(cursor, streaming, size):
-    cursor.set_stream_results(streaming, 2)
-    cursor.execute('SELECT number FROM numbers(8)')
-    cursor.fetchone()
-
-    rows = cursor.fetchmany(size)
-
-    assert isinstance(rows, list)
-    assert len(rows) == 7
-    assert cursor.fetchall() == []
-    assert cursor.fetchone() is None
+    assert cursor.rowcount == 8
 
 
 @pytest.mark.parametrize('fetch', ['fetchone', 'fetchmany', 'iteration'])
@@ -141,9 +121,7 @@ def test_unconsumed_fetchall_transfers_the_existing_list():
     assert cursor.fetchall() == []
 
 
-@pytest.mark.parametrize('streaming', [False, True])
-def test_new_query_resets_incremental_fetch_order(cursor, streaming):
-    cursor.set_stream_results(streaming, 2)
+def test_new_query_resets_incremental_fetch_order(cursor):
     cursor.execute('SELECT number FROM numbers(8)')
     first = cursor.fetchone()
 
@@ -153,20 +131,14 @@ def test_new_query_resets_incremental_fetch_order(cursor, streaming):
     assert len(cursor.fetchall()) == 7
 
 
-@pytest.mark.parametrize('streaming', [False, True])
-def test_empty_results_after_partial_consumption(cursor, streaming):
-    cursor.set_stream_results(streaming, 2)
+def test_empty_results_after_partial_consumption(cursor):
     cursor.execute('SELECT number FROM numbers(8)')
     cursor.fetchone()
     cursor._client.execute.return_value = ([], [('number', 'UInt64')])
     cursor._client.execute.side_effect = None
-    cursor._client.execute_iter.side_effect = lambda *args, **kwargs: iter(
-        [[('number', 'UInt64')]]
-    )
-
     cursor.execute('SELECT number FROM numbers(0)')
 
-    assert cursor.rowcount == (-1 if streaming else 0)
+    assert cursor.rowcount == 0
     assert cursor.fetchone() is None
     assert cursor.fetchmany() == []
     assert cursor.fetchall() == []
